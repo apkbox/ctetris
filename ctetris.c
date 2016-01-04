@@ -7,6 +7,7 @@
 #include <time.h>
 #endif
 
+#define LEAN_AND_MEAN
 #include <windows.h>
 
 #ifndef RANDOM_ROTATE
@@ -110,7 +111,22 @@ int ttm_pos_x, ttm_pos_y;
 
 /* TODO: We can track stack height, which will allow some optimizations */
 
+#define TIMER_TICKS_PER_CYCLE   25
+
+int timer_counter;
 int time_is_up;
+
+void reset_game_timer() {
+    timer_counter = 0;
+    time_is_up = 0;
+}
+
+void run_game_timer() {
+    if (++timer_counter >= 25) {
+        time_is_up = 1;
+        timer_counter = 0;
+    }
+}
 
 int max_int(int a, int b) {
     return a >= b ? a : b;
@@ -487,33 +503,22 @@ PlayCycleResult run_cycle() {
 
     flags = process_user_input();
     if ((flags & NEW_TETRIMINO_SPAWNED)) {
-        if (check_collision(0))
+        if (check_landing())
             result = END_OF_GAME;
 
-        /*
-            TODO: Here we need to reset timer, 
-            because new tetrimino was generated.
-        */
-        time_is_up = 0;
-        
+        /* Here we need to reset timer, because new tetrimino was generated. */
+        reset_game_timer();
     } else if (time_is_up) {
-        /* 
-            If user moved the piece into position that ended up being
-            a landing position, then advance_tetrimino still attempt
-            advance it without checking.
-            So, we check if piece is landed due to user input, then
-            we advance, if it is not, and then check again.
-        */
         if (advance_tetrimino()) {
             place_tetrimino();
             check_and_collapse_rows();
             spawn_new_tetrimino();
-            if (check_collision(0))
+            if (check_landing())
                 result = END_OF_GAME;
         }
         
         flags |= NEED_RENDER;
-        time_is_up = 0;
+        reset_game_timer();
     }
     
     if (flags & NEED_RENDER)
@@ -525,10 +530,9 @@ PlayCycleResult run_cycle() {
     return result;
 }
 
-PlayCycleResult play_loop() {
-    int i = 0;
-    PlayCycleResult result;
-    
+void init_game() {
+    int i;
+
     for (i = 0; i < (WIDTH * HEIGHT); ++i)
         gameboard[i] = 0;
 
@@ -538,12 +542,16 @@ PlayCycleResult play_loop() {
     assert(!check_collision(0));
 #endif
 
-    while (1) {
-        if (++i >= 25) {
-            time_is_up = 1;
-            i = 0;
-        }
+    reset_game_timer();
+}
 
+PlayCycleResult play_loop() {
+    PlayCycleResult result;
+    
+    init_game();
+    
+    while (1) {
+        run_game_timer();
         result = run_cycle();
         if (result != CONTINUE_PLAY)
             break;
