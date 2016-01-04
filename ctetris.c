@@ -38,6 +38,16 @@ typedef enum UserCommandTag {
     QUIT
 } UserCommand;
 
+typedef enum PlayCycleResultTag {
+    QUIT_GAME,
+    END_OF_GAME,
+    CONTINUE_PLAY
+} PlayCycleResult;
+
+#define NEED_RENDER             0x01
+#define NEW_TETRIMINO_SPAWNED   0x02
+#define QUIT_REQUESTED          0x04
+
 #ifndef NOMAIN
 UserCommand read_command_callback();
 void render_callback(int *gameboard, int width, int height);
@@ -147,8 +157,7 @@ void check_and_collapse_rows() {
                 rl = r;
             else
                 rh = r;
-        }
-        else if (rl != -1) {
+        } else if (rl != -1) {
             /* [rl, rh) - interval */
             if (rh == -1)
                 rh = r;
@@ -216,8 +225,19 @@ int check_landing() {
     return check_collision(1);
 }
 
-void advance_tetrimino() {
-    --ttm_pos_y;
+/*
+    Advances tetrimino towards the stack. If tetrimino is
+    in landed position then no advance preformed.
+
+    Returns 1 if tetrimino already in landed position before
+    advance was attempted or 0 otherwise.
+*/
+int advance_tetrimino() {
+    int landed = check_landing();
+    if (!landed)
+        --ttm_pos_y;
+        
+    return landed;
 }
 
 /*
@@ -280,12 +300,10 @@ void rotate_tetrimino(int angle) {
 }
 
 void move_tetrimino(int offset) {
-    if (offset < 0) {
+    if (offset < 0)
         --ttm_pos_x;
-    }
-    else if (offset > 0) {
+    else if (offset > 0)
         ++ttm_pos_x;
-    }
 }
 
 void spawn_new_tetrimino() {
@@ -300,8 +318,7 @@ void spawn_new_tetrimino() {
     if (next_tetrimino < 0) {
         ttm_index = rand() % 7;
         next_tetrimino = rand() % 7;
-    }
-    else {
+    } else {
         ttm_index = next_tetrimino;
         next_tetrimino = rand() % 7;
     }
@@ -336,7 +353,8 @@ void place_tetrimino() {
     int r, c;
     for (r = 0; r < 4; ++r) {
         for (c = 0; c < 4; ++c) {
-            /* ttm_pos_y may be such that places tetrimino outside bounds
+            /* 
+                ttm_pos_y may be such that places tetrimino outside bounds
                 of the gameboard completely or partially. This is the case
                 for spawning, where spawn position is in two rows above the
                 visible gameboard. We do not need to allocate these rows
@@ -357,11 +375,20 @@ void place_tetrimino() {
 }
 
 /* 
-    Returns 1 if user input resulted in need to render the gameboard.
-    Returns -1 if QUIT command received.
+    Returns flags that indicate result of processing of user input.
+        NEED_RENDER     
+            The user input changed the gameboard and it needs 
+            to be re-rendered.
+
+        NEW_TETRIMINO_SPAWNED
+            A new tetrimino is spawned, so the timer needs to be reset
+            and collision check should be performed.
+
+        QUIT_REQUESTED
+            User requested to quit application.
 */
 int process_user_input() {
-    int render = 0;
+    int flags = 0;
     UserCommand cmd = READ_COMMAND_CALLBACK();
     
     /* TODO: 
@@ -376,7 +403,7 @@ int process_user_input() {
             if (check_collision(0))
                 rotate_tetrimino(-90);
             else
-                render = 1;
+                flags |= NEED_RENDER;
             break;
 
         case ROTATE_CCW:
@@ -384,7 +411,7 @@ int process_user_input() {
             if (check_collision(0))
                 rotate_tetrimino(90);
             else
-                render = 1;
+                flags |= NEED_RENDER;
             break;
             
         case MOVE_LEFT:
@@ -392,7 +419,7 @@ int process_user_input() {
             if (check_collision(0))
                 move_tetrimino(1);
             else
-                render = 1;
+                flags |= NEED_RENDER;
             break;
             
         case MOVE_RIGHT:
@@ -400,50 +427,50 @@ int process_user_input() {
             if (check_collision(0))
                 move_tetrimino(-1);
             else
-                render = 1;
+                flags |= NEED_RENDER;
             break;
             
         case SPEEDUP:
-            /* TODO */
-            advance_tetrimino();
-            if (check_landing()) {
+            if (advance_tetrimino()) {
                 place_tetrimino();
                 check_and_collapse_rows();
                 spawn_new_tetrimino();
+                flags |= NEW_TETRIMINO_SPAWNED;
             }
-            render = 1;
+            flags |= NEED_RENDER;
             break;
             
         case DROP:
-            /* TODO:
+            /* 
                 1. Find the first non-empty row.
                 2. Move down checking for landing iteratively.
             */
             while (1) {
-                advance_tetrimino();
-                if (check_landing()) {
+                if (advance_tetrimino()) {
                     place_tetrimino();
                     check_and_collapse_rows();
                     spawn_new_tetrimino();
+                    flags |= NEW_TETRIMINO_SPAWNED;
                     break;
                 }
             }
-            render = 1;
+            flags |= NEED_RENDER;
             break;
             
         case QUIT:
-            return -1;
+            flags |= QUIT_REQUESTED;
+            break;
             
         case NOTHING:
         default:
             break;
     }
     
-    return render;
+    return flags;
 }
 
 void render_gameboard() {
-    /* TODO:
+    /*
         1. Place the tetramino on the gameboard
         2. Call render callback with gameboard address, width and height.
         3. Remove the teramino from the gameboard by XORing the tetramino
@@ -454,12 +481,22 @@ void render_gameboard() {
     place_tetrimino();
 }
 
-int run_cycle() {
-    int need_render = 0;
+PlayCycleResult run_cycle() {
+    PlayCycleResult result = CONTINUE_PLAY;
+    int flags;
 
-    need_render = process_user_input();
+    flags = process_user_input();
+    if ((flags & NEW_TETRIMINO_SPAWNED)) {
+        if (check_collision(0))
+            result = END_OF_GAME;
 
-    if (time_is_up) {
+        /*
+            TODO: Here we need to reset timer, 
+            because new tetrimino was generated.
+        */
+        time_is_up = 0;
+        
+    } else if (time_is_up) {
         /* 
             If user moved the piece into position that ended up being
             a landing position, then advance_tetrimino still attempt
@@ -467,29 +504,74 @@ int run_cycle() {
             So, we check if piece is landed due to user input, then
             we advance, if it is not, and then check again.
         */
-        if (!check_landing()) {
-            advance_tetrimino();
-        }
-        else {
+        if (advance_tetrimino()) {
             place_tetrimino();
             check_and_collapse_rows();
             spawn_new_tetrimino();
-            if (check_collision(0)) {
-                /* TODO: END OF GAME */; 
-            }
+            if (check_collision(0))
+                result = END_OF_GAME;
         }
         
-        need_render = 1;
+        flags |= NEED_RENDER;
         time_is_up = 0;
     }
     
-    if (need_render)
+    if (flags & NEED_RENDER)
         render_gameboard();
         
-    if (need_render < 0)
-        return 0;
+    if (flags & QUIT_REQUESTED)
+        result = QUIT_GAME;
         
-    return 1;
+    return result;
+}
+
+PlayCycleResult play_loop() {
+    int i = 0;
+    PlayCycleResult result;
+    
+    for (i = 0; i < (WIDTH * HEIGHT); ++i)
+        gameboard[i] = 0;
+
+    spawn_new_tetrimino();
+    
+#ifdef USE_STDLIB
+    assert(!check_collision(0));
+#endif
+
+    while (1) {
+        if (++i >= 25) {
+            time_is_up = 1;
+            i = 0;
+        }
+
+        result = run_cycle();
+        if (result != CONTINUE_PLAY)
+            break;
+            
+        /* TODO: Remove dependency on WINAPI */
+        Sleep(20);  // 20ms (50Hz)
+    }
+    
+    return result;
+}
+
+void game_loop() {
+    while (1) {
+        while (1) {
+            UserCommand cmd = READ_COMMAND_CALLBACK();
+            if (cmd == QUIT)
+                return;
+            else if (cmd != NOTHING)
+                break;
+
+            /* TODO: Remove dependency on WINAPI */
+            Sleep(300);
+        }
+    
+        PlayCycleResult result = play_loop();
+        if (result == QUIT_GAME)
+            break;
+    }
 }
 
 #ifndef NOMAIN
@@ -499,9 +581,9 @@ UserCommand read_command_callback() {
     if (!_kbhit())
         return NOTHING;
 
-    int c = getch();
+    int c = _getch();
     if (c == 224) {
-        c = getch();
+        c = _getch();
         switch(c) {
             case 75:
                 return MOVE_LEFT;
@@ -574,6 +656,10 @@ void render_callback(int *gameboard, int width, int height) {
     COORD preview_sb_size;
     SMALL_RECT preview_sb_rect;
     
+    /* Suppress pedantic warning */
+    width = width;
+    height = height;
+    
     for (y = 0; y < HEIGHT; ++y) {
         for (x = 0; x < WIDTH; ++x) {
             CHAR_INFO *sptr = &screen_buffer[(HEIGHT - 1 - y) * WIDTH + x];
@@ -626,24 +712,6 @@ void render_callback(int *gameboard, int width, int height) {
         preview_sb_pos,         /* top left src cell in screen_buffer   */
         &preview_sb_rect);      /* dest. screen buffer rectangle        */
 #endif
-}
-
-void game_loop() {
-    int i = 0;
-    
-    spawn_new_tetrimino();
-
-    while(1) {
-        if (++i >= 25) {
-            time_is_up = 1;
-            i = 0;
-        }
-
-        if (!run_cycle())
-            break;
-            
-        Sleep(20);  // 20ms
-    }
 }
 
 int main() {
