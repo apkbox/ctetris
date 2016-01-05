@@ -131,14 +131,14 @@ void render_callback(int *gameboard, int width, int height) {
 #endif
 }
 
-void __stdcall WinMainCRTStartup() {
+int __stdcall WinMainCRTStartup() {
     CONSOLE_SCREEN_BUFFER_INFO console_info;
     
     AllocConsole();
     
     screen_buffer_handle = GetStdHandle(STD_OUTPUT_HANDLE);
     if (screen_buffer_handle == INVALID_HANDLE_VALUE) {
-        ExitProcess(1);
+        return 1;
     }
     
     GetConsoleScreenBufferInfo(screen_buffer_handle, &console_info);
@@ -156,5 +156,5 @@ void __stdcall WinMainCRTStartup() {
     screen_buffer_size.Y = console_info.dwSize.Y;
     SetConsoleScreenBufferSize(screen_buffer_handle, screen_buffer_size);
 
-    ExitProcess(0);
+    return 0;
 }
