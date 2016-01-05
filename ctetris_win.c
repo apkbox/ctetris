@@ -8,9 +8,11 @@
 #define ttm_read_command_callback() read_command_callback()
 #define ttm_render_callback(gb, w, h) render_callback(gb, w, h)
 
+#define NOCLIB
+
 int win_rnd();
 int read_command_callback();
-void render_callback(int *gameboard, int width, int height);
+void render_callback(char *gameboard, int width, int height);
 
 #include "ctetris.c"
 

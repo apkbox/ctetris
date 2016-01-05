@@ -15,6 +15,9 @@
 #define SHOW_NEXT       1
 #endif
 
+typedef char ttm_byte;
+typedef short ttm_word;
+
 typedef enum UserCommandTag {
     NOTHING,
     ROTATE_CW,
@@ -49,7 +52,8 @@ typedef enum UserCommandTag {
 
 UserCommand ttm_read_command_callback();
 
-#define swap_int(a, b)  { int t = (a); (a) = (b); (b) = t; }
+#define swap_byte(a, b)  { ttm_byte t = (a); (a) = (b); (b) = t; }
+#define swap_word(a, b)  { ttm_word t = (a); (a) = (b); (b) = t; }
 
 typedef enum PlayCycleResultTag {
     QUIT_GAME,
@@ -62,11 +66,11 @@ typedef enum PlayCycleResultTag {
 #define QUIT_REQUESTED          0x04
 
 typedef struct TetriminoTag {
-    int defx[4];
-    int defy[4];
-    int x;      /* x,y - rotation matrix 0,0 */
-    int y;
-    int box;    /* side of a square box that tetrimino is fits == max(w,h) */
+    ttm_byte defx[4];
+    ttm_byte defy[4];
+    ttm_byte x;      /* x,y - rotation matrix 0,0 */
+    ttm_byte y;
+    ttm_byte box;    /* side of a square box that tetrimino is fits == max(w,h) */
 } Tetrimino;
 
 Tetrimino tetriminos[7] = {
@@ -101,21 +105,21 @@ Tetrimino tetriminos[7] = {
 };
 
 #if SHOW_NEXT
-int next_tetrimino = -1;
+ttm_byte next_tetrimino = -1;
 #endif
 
-int gameboard[WIDTH * HEIGHT];
+ttm_byte gameboard[WIDTH * HEIGHT];
 
-int tetrimino[4*4];
-int ttm_x, ttm_y, ttm_box;
-int ttm_pos_x, ttm_pos_y;
+ttm_byte tetrimino[4*4];
+ttm_byte ttm_x, ttm_y, ttm_box;
+ttm_byte ttm_pos_x, ttm_pos_y;
 
 /* TODO: We can track stack height, which will allow some optimizations */
 
 #define TIMER_TICKS_PER_CYCLE   25
 
-int timer_counter;
-int time_is_up;
+ttm_byte timer_counter;
+ttm_byte time_is_up;
 
 void reset_game_timer() {
     timer_counter = 0;
@@ -133,7 +137,16 @@ int max_int(int a, int b) {
     return a >= b ? a : b;
 }
 
-void collapse_rows(int rl, int rh) {
+#ifdef NOCLIB
+void *memset(void *ptr, int v, size_t s) {
+    char *p = (char *)ptr;
+    while (p < (((char *)ptr) + s))
+        *p++ = v;
+    return ptr;
+}
+#endif
+
+void collapse_rows(ttm_byte rl, ttm_byte rh) {
     int i;
     int laddr = rl * WIDTH;
     int haddr = rh * WIDTH;
@@ -186,7 +199,7 @@ void check_and_collapse_rows() {
     }
 }
 
-int check_collision(int landing) {
+int check_collision(ttm_byte landing) {
     int r, c;
     
     /*
@@ -262,7 +275,7 @@ int advance_tetrimino() {
     x_off, y_off location of matrix in the buffer
     ms matrix size (width and height)
  */
-void transpose(int *m, int bs, int x_off, int y_off, int ms) {
+void transpose(ttm_byte *m, ttm_byte bs, ttm_byte x_off, ttm_byte y_off, ttm_byte ms) {
     int x, y;
     
     ttm_assert((x_off + ms) <= bs);
@@ -270,37 +283,37 @@ void transpose(int *m, int bs, int x_off, int y_off, int ms) {
 
     for (y = 0; y < ms; ++y) {
         for (x = y + 1; x < ms; ++x) {
-            int *mrx = &m[(y + y_off) * bs + x + x_off];
-            int *mry = &m[(x + x_off) * bs + y + y_off];
-            swap_int(*mrx, *mry);
+            ttm_byte *mrx = &m[(y + y_off) * bs + x + x_off];
+            ttm_byte *mry = &m[(x + x_off) * bs + y + y_off];
+            swap_byte(*mrx, *mry);
         }
     }
 }
 
-void mirror_y(int *m, int bs, int x_off, int y_off, int ms) {
+void mirror_y(ttm_byte *m, ttm_byte bs, ttm_byte x_off, ttm_byte y_off, ttm_byte ms) {
     int x, y;
 
     for (y = 0; y < ms; ++y) {
         for (x = 0; x < ms / 2; ++x) {
-            int *row = &m[(y + y_off) * bs];
-            int *mrl = &row[x + x_off];
-            int *mrr = &row[ms - 1 - x - x_off];
-            swap_int(*mrl, *mrr);
+            ttm_byte *row = &m[(y + y_off) * bs];
+            ttm_byte *mrl = &row[x + x_off];
+            ttm_byte *mrr = &row[ms - 1 - x - x_off];
+            swap_byte(*mrl, *mrr);
         }
     }
 }
 
-void rotate_cw(int *m, int bs, int x_off, int y_off, int ms) {
+void rotate_cw(ttm_byte *m, ttm_byte bs, ttm_byte x_off, ttm_byte y_off, ttm_byte ms) {
     transpose(m, bs, x_off, y_off, ms);
     mirror_y(m, bs, x_off, y_off, ms);
 }
 
-void rotate_ccw(int *m, int bs, int x_off, int y_off, int ms) {
+void rotate_ccw(ttm_byte *m, ttm_byte bs, ttm_byte x_off, ttm_byte y_off, ttm_byte ms) {
     mirror_y(m, bs, x_off, y_off, ms);
     transpose(m, bs, x_off, y_off, ms);
 }
 
-void rotate_tetrimino(int angle) {
+void rotate_tetrimino(ttm_byte angle) {
     switch (angle) {
         case 90:
             rotate_cw(tetrimino, 4, ttm_x, ttm_y, ttm_box);
@@ -312,7 +325,7 @@ void rotate_tetrimino(int angle) {
     }
 }
 
-void move_tetrimino(int offset) {
+void move_tetrimino(ttm_byte offset) {
     if (offset < 0)
         --ttm_pos_x;
     else if (offset > 0)
@@ -321,10 +334,10 @@ void move_tetrimino(int offset) {
 
 void spawn_new_tetrimino() {
     int i;
-    int ttm_index;
+    ttm_byte ttm_index;
     Tetrimino *tmdef;
 #if RANDOM_ROTATE
-    int rotation;
+    ttm_byte rotation;
 #endif
     
 #if SHOW_NEXT
@@ -375,7 +388,7 @@ void place_tetrimino() {
             */
             int row = ttm_pos_y + r;
             if (row < HEIGHT) {
-                int *pfcell = &gameboard[(ttm_pos_y + r) * WIDTH + ttm_pos_x + c];
+                ttm_byte *pfcell = &gameboard[(ttm_pos_y + r) * WIDTH + ttm_pos_x + c];
                 /* 
                     Use XOR instead or OR so we can use it for rendering.
                     Normally there should be no collisions between
