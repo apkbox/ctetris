@@ -1,23 +1,4 @@
-#define USE_STDLIB
-#ifdef USE_STDLIB
-#include <assert.h>
-#include <stdio.h>
-#include <conio.h>
-#include <stdlib.h>
-#include <time.h>
-#endif
-
-#define LEAN_AND_MEAN
-#include <windows.h>
-
-#ifndef RANDOM_ROTATE
-#define RANDOM_ROTATE   0
-#endif
-
-#ifndef SHOW_NEXT
-#define SHOW_NEXT       1
-#endif
-
+/* ctetris.c */
 #ifndef WIDTH
 #define WIDTH 10
 #endif
@@ -26,7 +7,13 @@
 #define HEIGHT 20
 #endif
 
-#define swap_int(a, b)  { int t = (a); (a) = (b); (b) = t; }
+#ifndef RANDOM_ROTATE
+#define RANDOM_ROTATE   0
+#endif
+
+#ifndef SHOW_NEXT
+#define SHOW_NEXT       1
+#endif
 
 typedef enum UserCommandTag {
     NOTHING,
@@ -39,6 +26,31 @@ typedef enum UserCommandTag {
     QUIT
 } UserCommand;
 
+#ifndef ttm_assert
+#define ttm_assert(e)
+#endif
+
+#ifndef ttm_rnd_init
+#define ttm_rnd_init()
+#endif
+
+#ifndef ttm_rnd
+#define ttm_rnd()   (1)
+#endif
+
+#ifndef ttm_sleep_ms
+#define ttm_sleep_ms(ms)
+#endif
+
+#ifndef ttm_render_callback
+#define ttm_render_callback(gameboard, width, height)
+#define NO_RENDER
+#endif
+
+UserCommand ttm_read_command_callback();
+
+#define swap_int(a, b)  { int t = (a); (a) = (b); (b) = t; }
+
 typedef enum PlayCycleResultTag {
     QUIT_GAME,
     END_OF_GAME,
@@ -48,17 +60,6 @@ typedef enum PlayCycleResultTag {
 #define NEED_RENDER             0x01
 #define NEW_TETRIMINO_SPAWNED   0x02
 #define QUIT_REQUESTED          0x04
-
-#ifndef NOMAIN
-UserCommand read_command_callback();
-void render_callback(int *gameboard, int width, int height);
-
-#define READ_COMMAND_CALLBACK() read_command_callback()
-#define RENDER_CALLBACK(gameboard, width, height) render_callback(gameboard, width, height)
-#else
-#define READ_COMMAND_CALLBACK() (DROP)
-#define RENDER_CALLBACK(gameboard, width, height) {}
-#endif
 
 typedef struct TetriminoTag {
     int defx[4];
@@ -138,9 +139,7 @@ void collapse_rows(int rl, int rh) {
     int haddr = rh * WIDTH;
     int size = WIDTH * HEIGHT - haddr;
     
-#ifdef USE_STDLIB
-    assert(rl < rh);
-#endif
+    ttm_assert(rl < rh);
 
     for (i = 0; i < size; ++i)
         gameboard[laddr + i] = gameboard[haddr + i];
@@ -266,10 +265,8 @@ int advance_tetrimino() {
 void transpose(int *m, int bs, int x_off, int y_off, int ms) {
     int x, y;
     
-#ifdef USE_STDLIB
-    assert((x_off + ms) <= bs);
-    assert((y_off + ms) <= bs);
-#endif
+    ttm_assert((x_off + ms) <= bs);
+    ttm_assert((y_off + ms) <= bs);
 
     for (y = 0; y < ms; ++y) {
         for (x = y + 1; x < ms; ++x) {
@@ -332,14 +329,14 @@ void spawn_new_tetrimino() {
     
 #if SHOW_NEXT
     if (next_tetrimino < 0) {
-        ttm_index = rand() % 7;
-        next_tetrimino = rand() % 7;
+        ttm_index = ttm_rnd() % 7;
+        next_tetrimino = ttm_rnd() % 7;
     } else {
         ttm_index = next_tetrimino;
-        next_tetrimino = rand() % 7;
+        next_tetrimino = ttm_rnd() % 7;
     }
 #else
-    ttm_index = rand() % 7;
+    ttm_index = ttm_rnd() % 7;
 #endif
     
     tmdef = &tetriminos[ttm_index];
@@ -357,7 +354,7 @@ void spawn_new_tetrimino() {
     }
     
 #if RANDOM_ROTATE
-    rotation = rand() % 3;
+    rotation = ttm_rnd() % 3;
     rotate_tetrimino(rotation * 90);
 #endif
     
@@ -405,7 +402,7 @@ void place_tetrimino() {
 */
 int process_user_input() {
     int flags = 0;
-    UserCommand cmd = READ_COMMAND_CALLBACK();
+    UserCommand cmd = ttm_read_command_callback();
     
     /* TODO: 
         For now just skip the whole wall/floor kick thing as it is
@@ -492,9 +489,11 @@ void render_gameboard() {
         3. Remove the teramino from the gameboard by XORing the tetramino
            matrix with the gameboard.
     */
+#ifndef NO_RENDER    
     place_tetrimino();
-    RENDER_CALLBACK(gameboard, WIDTH, HEIGHT);
+    ttm_render_callback(gameboard, WIDTH, HEIGHT);
     place_tetrimino();
+#endif    
 }
 
 PlayCycleResult run_cycle() {
@@ -538,9 +537,7 @@ void init_game() {
 
     spawn_new_tetrimino();
     
-#ifdef USE_STDLIB
-    assert(!check_collision(0));
-#endif
+    ttm_assert(!check_collision(0));
 
     reset_game_timer();
 }
@@ -556,24 +553,24 @@ PlayCycleResult play_loop() {
         if (result != CONTINUE_PLAY)
             break;
             
-        /* TODO: Remove dependency on WINAPI */
-        Sleep(20);  // 20ms (50Hz)
+        ttm_sleep_ms(20);  // 20ms (50Hz)
     }
     
     return result;
 }
 
 void game_loop() {
+    ttm_rnd_init();
+
     while (1) {
         while (1) {
-            UserCommand cmd = READ_COMMAND_CALLBACK();
+            UserCommand cmd = ttm_read_command_callback();
             if (cmd == QUIT)
                 return;
             else if (cmd != NOTHING)
                 break;
 
-            /* TODO: Remove dependency on WINAPI */
-            Sleep(300);
+            ttm_sleep_ms(300);
         }
     
         PlayCycleResult result = play_loop();
@@ -581,189 +578,3 @@ void game_loop() {
             break;
     }
 }
-
-#ifndef NOMAIN
-
-UserCommand read_command_callback() {
-#ifdef USE_STDLIB
-    if (!_kbhit())
-        return NOTHING;
-
-    int c = _getch();
-    if (c == 224) {
-        c = _getch();
-        switch(c) {
-            case 75:
-                return MOVE_LEFT;
-            case 77:
-                return MOVE_RIGHT;
-            case 72: /* UP */
-                return ROTATE_CCW;
-            case 80: /* DOWN */
-                return ROTATE_CW;
-        }
-    } else if (c == 'r' || c == 'R') {
-        return SPEEDUP;
-    } else if (c == ' ') {
-        return DROP;
-    } else if (c == 'q' || c == 'Q') {
-        return QUIT;
-    }
-    
-#else
-    DWORD wait_result;
-    HANDLE std_input_handle;
-    
-    std_input_handle = GetStdHandle(STD_INPUT_HANDLE);
-    
-    wait_result = WaitForSingleObject(std_input_handle, 0);
-    if (wait_result == WAIT_OBJECT_0)  {
-        INPUT_RECORD input_record;
-        DWORD records_read;
-        BOOL result = ReadConsoleInput(std_input_handle, 
-                &input_record,
-                1,
-                &records_read);
-        if (result &&
-                input_record.EventType == KEY_EVENT &&
-                input_record.Event.KeyEvent.bKeyDown) {
-            WORD key = input_record.Event.KeyEvent.wVirtualKeyCode;
-            switch (key) {
-                case VK_LEFT:
-                    return MOVE_LEFT;
-                case VK_RIGHT:
-                    return MOVE_RIGHT;
-                case VK_UP: /* UP */
-                    return ROTATE_CCW;
-                case VK_DOWN: /* DOWN */
-                    return ROTATE_CW;
-                case 0x52:
-                    return SPEEDUP;
-                case VK_SPACE:
-                    return DROP;
-                case 0x51:
-                    return QUIT;
-            }
-        }
-    }
-#endif
-        
-    return NOTHING;
-}
-
-HANDLE screen_buffer_handle;
-CHAR_INFO screen_buffer[WIDTH * HEIGHT];
-COORD screen_buffer_pos;
-COORD screen_buffer_size;
-
-void render_callback(int *gameboard, int width, int height) {
-    SMALL_RECT screen_buffer_rect;
-    int x, y, i;
-    CHAR_INFO preview_sb[4 * 4];
-    COORD preview_sb_pos;
-    COORD preview_sb_size;
-    SMALL_RECT preview_sb_rect;
-    
-    /* Suppress pedantic warning */
-    width = width;
-    height = height;
-    
-    for (y = 0; y < HEIGHT; ++y) {
-        for (x = 0; x < WIDTH; ++x) {
-            CHAR_INFO *sptr = &screen_buffer[(HEIGHT - 1 - y) * WIDTH + x];
-            sptr->Char.AsciiChar = gameboard[y * WIDTH + x] ? '\xDB' : '\xfa';
-            sptr->Attributes = FOREGROUND_GREEN;
-        }
-    }
-
-    screen_buffer_rect.Left = 0;
-    screen_buffer_rect.Top = 0;
-    screen_buffer_rect.Right = WIDTH - 1;
-    screen_buffer_rect.Bottom = HEIGHT - 1;
-    
-    WriteConsoleOutput( 
-        screen_buffer_handle,   /* screen buffer to write to            */
-        screen_buffer,          /* buffer to copy from                  */
-        screen_buffer_size,     /* col-row size of screen_buffer        */
-        screen_buffer_pos,      /* top left src cell in screen_buffer   */
-        &screen_buffer_rect);   /* dest. screen buffer rectangle        */
-
-#if SHOW_NEXT
-    if (next_tetrimino >= 0) {
-        for (i = 0; i < 4 * 4; ++i) {
-            CHAR_INFO *sptr = &preview_sb[i];
-            sptr->Char.AsciiChar = ' ';
-            sptr->Attributes = FOREGROUND_GREEN;
-        }
-        
-        for (i = 0; i < 4; ++i) {
-            Tetrimino *ttm = &tetriminos[next_tetrimino];
-            CHAR_INFO *sptr = &preview_sb[(4 - ttm->defy[i]) * 4 + ttm->defx[i]];
-            sptr->Char.AsciiChar = '\xDB';
-            sptr->Attributes = FOREGROUND_GREEN;
-        }
-    }
-    
-    preview_sb_size.X = 4;
-    preview_sb_size.Y = 4;
-    preview_sb_pos.X = 0;
-    preview_sb_pos.Y = 0;
-    preview_sb_rect.Left = 23;
-    preview_sb_rect.Top = 4;
-    preview_sb_rect.Right = 23 + 4;
-    preview_sb_rect.Bottom = 4 + 4;
-
-    WriteConsoleOutput( 
-        screen_buffer_handle,   /* screen buffer to write to            */
-        preview_sb,             /* buffer to copy from                  */
-        preview_sb_size,        /* col-row size of screen_buffer        */
-        preview_sb_pos,         /* top left src cell in screen_buffer   */
-        &preview_sb_rect);      /* dest. screen buffer rectangle        */
-#endif
-}
-
-int main() {
-    CONSOLE_SCREEN_BUFFER_INFO console_info;
-    
-#ifdef USE_STDLIB
-    srand(time(NULL));
-#else
-    /* TODO: Non-stdlib based random generator */
-#endif
-
-    screen_buffer_handle = GetStdHandle(STD_OUTPUT_HANDLE);
-    // screen_buffer_handle = CreateConsoleScreenBuffer(
-            // GENERIC_READ | GENERIC_WRITE,
-            // FILE_SHARE_READ | FILE_SHARE_WRITE,
-            // NULL, 
-            // CONSOLE_TEXTMODE_BUFFER,
-            // NULL);
-    if (screen_buffer_handle == INVALID_HANDLE_VALUE) {
-#ifdef USE_STDLIB
-        printf("error: cannot create console screen buffer\n");
-#endif
-        return 1;
-    }
-    
-    // SetConsoleActiveScreenBuffer(screen_buffer_handle);
-
-    GetConsoleScreenBufferInfo(screen_buffer_handle, &console_info);
-
-    screen_buffer_pos.X = 0;
-    screen_buffer_pos.Y = 0;
-    
-    screen_buffer_size.X = WIDTH;
-    screen_buffer_size.Y = HEIGHT;
-    SetConsoleScreenBufferSize(screen_buffer_handle, screen_buffer_size);
-
-    game_loop();
-
-    screen_buffer_size.X = console_info.dwSize.X;
-    screen_buffer_size.Y = console_info.dwSize.Y;
-    SetConsoleScreenBufferSize(screen_buffer_handle, screen_buffer_size);
-
-    return 0;
-}
-
-#endif
-
