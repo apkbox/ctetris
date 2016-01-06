@@ -348,10 +348,11 @@ void spawn_new_tetrimino() {
         int r = tmdef->defy[i];
         int c = tmdef->defx[i];
         tetrimino[r * 4 + c] = 1;
-        ttm_x = tmdef->x;
-        ttm_y = tmdef->y;
-        ttm_box = tmdef->box;
     }
+
+    ttm_x = tmdef->x;
+    ttm_y = tmdef->y;
+    ttm_box = tmdef->box;
     
 #if RANDOM_ROTATE
     rotation = ttm_rnd() % 3;
