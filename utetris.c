@@ -1,4 +1,4 @@
-/* ctetris.c */
+/* utetris.c */
 #ifndef WIDTH
 #define WIDTH 10
 #endif
