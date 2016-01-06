@@ -67,27 +67,25 @@ typedef enum PlayCycleResultTag {
 
 typedef struct TetriminoTag {
     ttm_word def;
-    ttm_byte x:1;      /* x,y - rotation matrix 0,0 */
-    ttm_byte y:1;
     /* TODO: Optimize here as we need only to cover range (2..4) */
     ttm_byte box:4;    /* side of a square box that tetrimino is fits == max(w,h) */
 } Tetrimino;
 
 Tetrimino tetriminos[7] = {
     /* I */
-    { 0x0F00, 0, 0, 4 },
+    { 0x0F00, 4 },
     /* J */
-    { 0x0170, 0, 0, 3 },
+    { 0x0170, 3 },
     /* L */
-    { 0x0470, 0, 0, 3 },
+    { 0x0470, 3 },
     /* O */
-    { 0x0660, 1, 1, 2 },
+    { 0x0660, 2 },
     /* S */
-    { 0x0630, 0, 0, 3 },
+    { 0x0630, 3 },
     /* T (upside-down) */
-    { 0x0270, 0, 0, 3 },
+    { 0x0270, 3 },
     /* Z */
-    { 0x0360, 0, 0, 3 },
+    { 0x0360, 3 },
 };
 
 #if SHOW_NEXT
@@ -101,7 +99,7 @@ ttm_word gameboard[HEIGHT];
 
 /* A single tetrimino with bottom left being bit zero. */
 ttm_word tetrimino[4];
-ttm_byte ttm_x, ttm_y, ttm_box;
+Tetrimino *ttm_def;
 ttm_byte ttm_pos_x, ttm_pos_y;
 
 /* TODO: We can track stack height, which will allow some optimizations */
@@ -208,20 +206,11 @@ int check_collision(ttm_byte landing) {
         
         if (row < 0 || row >= HEIGHT)
             continue;
-            
-        int col = ttm_pos_x;
-        int col_offset = row + col;
-        
-        if (col < 0 || col >= WIDTH) {
-            if (tetrimino[r] & (~ROW_MASK))
-                return 1;
-            continue;
-        }
 
-        /* Not done here
-        int pfcell = gameboard[col_offset];
-        int tmcell = tetrimino[r * 4 + c];
-        if (pfcell && tmcell)
+        if (tetrimino[r] & (~ROW_MASK))
+            return 1;
+
+        if (gameboard[row] & tetrimino[r])
             return 1;
     }
 
@@ -243,78 +232,121 @@ int advance_tetrimino() {
     int landed = check_landing();
     if (!landed)
         --ttm_pos_y;
-        
+
     return landed;
+}
+
+void transpose4x4(ttm_word *m, ttm_byte offset) {
+    ttm_word m0 = m[0] >> offset;
+    ttm_word m1 = m[1] >> offset;
+    ttm_word m2 = m[2] >> offset;
+    ttm_word m3 = m[3] >> offset;
+
+    m[0] = ((m0 & 0x1) | (m1 << 1 & 0x2) | (m2 << 2 & 0x4) | (m3 << 3 & 0x8)) << offset;
+    m[1] = ((m0 >> 1 & 0x1) | (m1 & 0x2) | (m2 << 1 & 0x4) | (m3 << 2 & 0x8)) << offset;
+    m[2] = ((m0 >> 2 & 0x1) | (m1 >> 1 & 0x2) | (m2 & 0x4) | (m3 << 1 & 0x8)) << offset;
+    m[3] = ((m0 >> 3 & 0x1) | (m1 >> 2 & 0x2) | (m2 >> 1 & 0x4) | (m3 & 0x8)) << offset;
+}
+
+void transpose3x3(ttm_word *m, ttm_byte offset) {
+    ttm_word m0 = m[0] >> offset;
+    ttm_word m1 = m[1] >> offset;
+    ttm_word m2 = m[2] >> offset;
+
+    m[0] = ((m0 & 0x1) | (m1 << 1 & 0x2) | (m2 << 2 & 0x4)) << offset;
+    m[1] = ((m0 >> 1 & 0x1) | (m1 & 0x2) | (m2 << 1 & 0x4)) << offset;
+    m[2] = ((m0 >> 2 & 0x1) | (m1 >> 1 & 0x2) | (m2 & 0x4)) << offset;
 }
 
 /*
     Transposes a square matrix.
-    m matrix
-    bs buffer size (width and height)
-    x_off, y_off location of matrix in the buffer
-    ms matrix size (width and height)
  */
-void transpose(ttm_byte *m, ttm_byte bs, ttm_byte x_off, ttm_byte y_off, ttm_byte ms) {
-    int x, y;
-    
-    ttm_assert((x_off + ms) <= bs);
-    ttm_assert((y_off + ms) <= bs);
-
-    for (y = 0; y < ms; ++y) {
-        for (x = y + 1; x < ms; ++x) {
-            ttm_byte *mrx = &m[(y + y_off) * bs + x + x_off];
-            ttm_byte *mry = &m[(x + x_off) * bs + y + y_off];
-            swap_byte(*mrx, *mry);
-        }
+void transpose(ttm_word *m, ttm_byte offset, ttm_byte matrix_size) {
+    switch (matrix_size) {
+        case 4:
+            transpose4x4(m, offset);
+            break;
+            
+        case 3:
+            transpose3x3(m, offset);
+            break;
     }
 }
 
-void mirror_y(ttm_byte *m, ttm_byte bs, ttm_byte x_off, ttm_byte y_off, ttm_byte ms) {
-    int x, y;
+void mirror_y4x4(ttm_word *m, ttm_byte offset) {
+    ttm_word m0 = m[0] >> offset;
+    ttm_word m1 = m[1] >> offset;
+    ttm_word m2 = m[2] >> offset;
+    ttm_word m3 = m[3] >> offset;
 
-    for (y = 0; y < ms; ++y) {
-        for (x = 0; x < ms / 2; ++x) {
-            ttm_byte *row = &m[(y + y_off) * bs];
-            ttm_byte *mrl = &row[x + x_off];
-            ttm_byte *mrr = &row[ms - 1 - x - x_off];
-            swap_byte(*mrl, *mrr);
-        }
+    m[0] = ((m0 << 3 & 0x8) | (m0 << 1 & 0x4) | (m0 >> 1 & 0x2) | (m0 >> 3 & 0x1)) << offset;
+    m[1] = ((m1 << 3 & 0x8) | (m1 << 1 & 0x4) | (m1 >> 1 & 0x2) | (m1 >> 3 & 0x1)) << offset;
+    m[2] = ((m2 << 3 & 0x8) | (m2 << 1 & 0x4) | (m2 >> 1 & 0x2) | (m2 >> 3 & 0x1)) << offset;
+    m[3] = ((m3 << 3 & 0x8) | (m3 << 1 & 0x4) | (m3 >> 1 & 0x2) | (m3 >> 3 & 0x1)) << offset;
+}
+
+void mirror_y3x3(ttm_word *m, ttm_byte offset) {
+    ttm_word m0 = m[0] >> offset;
+    ttm_word m1 = m[1] >> offset;
+    ttm_word m2 = m[2] >> offset;
+    ttm_word m3 = m[3] >> offset;
+
+    m[0] = ((m0 << 2 & 0x4) | (m0 & 0x2) | (m0 >> 2 & 0x1)) << offset;
+    m[1] = ((m1 << 2 & 0x4) | (m1 & 0x2) | (m1 >> 2 & 0x1)) << offset;
+    m[2] = ((m2 << 2 & 0x4) | (m2 & 0x2) | (m2 >> 2 & 0x1)) << offset;
+}
+
+void mirror_y(ttm_word *m, ttm_byte offset, ttm_byte matrix_size) {
+    switch (matrix_size) {
+        case 4:
+            mirror_y4x4(m, offset);
+            break;
+            
+        case 3:
+            mirror_y3x3(m, offset);
+            break;
     }
 }
 
-void rotate_cw(ttm_byte *m, ttm_byte bs, ttm_byte x_off, ttm_byte y_off, ttm_byte ms) {
-    transpose(m, bs, x_off, y_off, ms);
-    mirror_y(m, bs, x_off, y_off, ms);
+void rotate_cw(ttm_word *m, ttm_byte offset, ttm_byte matrix_size) {
+    transpose(m, offset, matrix_size);
+    mirror_y(m, offset, matrix_size);
 }
 
-void rotate_ccw(ttm_byte *m, ttm_byte bs, ttm_byte x_off, ttm_byte y_off, ttm_byte ms) {
-    mirror_y(m, bs, x_off, y_off, ms);
-    transpose(m, bs, x_off, y_off, ms);
+void rotate_ccw(ttm_word *m, ttm_byte offset, ttm_byte matrix_size) {
+    mirror_y(m, offset, matrix_size);
+    transpose(m, offset, matrix_size);
 }
 
 void rotate_tetrimino(ttm_byte angle) {
     switch (angle) {
         case 90:
-            rotate_cw(tetrimino, 4, ttm_x, ttm_y, ttm_box);
+            rotate_cw(tetrimino, ttm_pos_x, ttm_def->box);
             break;
             
         case -90:
-            rotate_ccw(tetrimino, 4, ttm_x, ttm_y, ttm_box);
+            rotate_ccw(tetrimino, ttm_pos_x, ttm_def->box);
             break;
     }
 }
 
 void move_tetrimino(ttm_byte offset) {
-    if (offset < 0)
+    int i;
+
+    if (offset < 0) {
+        for (i = 0; i < 4; ++i)
+            tetrimino[i] >>= 1;
         --ttm_pos_x;
-    else if (offset > 0)
+    } else if (offset > 0) {
+        for (i = 0; i < 4; ++i)
+            tetrimino[i] <<= 1;
         ++ttm_pos_x;
+    }
 }
 
 void spawn_new_tetrimino() {
     int i;
     ttm_byte ttm_index;
-    Tetrimino *tmdef;
 #if RANDOM_ROTATE
     ttm_byte rotation;
 #endif
@@ -331,50 +363,42 @@ void spawn_new_tetrimino() {
     ttm_index = ttm_rnd() % 7;
 #endif
     
-    tmdef = &tetriminos[ttm_index];
+    ttm_def = &tetriminos[ttm_index];
     
-    for (i = 0; i < 16; ++i)
+    for (i = 0; i < 4; ++i)
         tetrimino[i] = 0;
         
-    for (i = 0; i < 4; ++i) {
-        int r = tmdef->defy[i];
-        int c = tmdef->defx[i];
-        tetrimino[r * 4 + c] = 1;
-        ttm_x = tmdef->x;
-        ttm_y = tmdef->y;
-        ttm_box = tmdef->box;
-    }
-    
+    ttm_pos_y = HEIGHT - 2;
+    ttm_pos_x = (WIDTH - ttm_def->box) / 2 + 3;   /* +3 for 3 bit padding */
+
+    for (i = 0; i < 4; ++i)
+        tetrimino[i] = ((((ttm_word)ttm_def->def) >> (i * 4)) & 0x000F) << ttm_pos_x;
+
 #if RANDOM_ROTATE
     rotation = ttm_rnd() % 3;
     rotate_tetrimino(rotation * 90);
 #endif
-    
-    ttm_pos_y = HEIGHT - 2;
-    ttm_pos_x = (WIDTH - ttm_box) / 2;
 }
 
 void place_tetrimino() {
     int r, c;
     for (r = 0; r < 4; ++r) {
-        for (c = 0; c < 4; ++c) {
+        /* 
+            ttm_pos_y may be such that places tetrimino outside bounds
+            of the gameboard completely or partially. This is the case
+            for spawning, where spawn position is in two rows above the
+            visible gameboard. We do not need to allocate these rows
+            as they never rendered, thus the check.
+        */
+        int row = ttm_pos_y + r;
+        if (row < HEIGHT) {
+            ttm_word *rowptr = &gameboard[(ttm_pos_y + r)];
             /* 
-                ttm_pos_y may be such that places tetrimino outside bounds
-                of the gameboard completely or partially. This is the case
-                for spawning, where spawn position is in two rows above the
-                visible gameboard. We do not need to allocate these rows
-                as they never rendered, thus the check.
+                Use XOR instead or OR so we can use it for rendering.
+                Normally there should be no collisions between
+                stack and tetrimino.
             */
-            int row = ttm_pos_y + r;
-            if (row < HEIGHT) {
-                ttm_byte *pfcell = &gameboard[(ttm_pos_y + r) * WIDTH + ttm_pos_x + c];
-                /* 
-                    Use XOR instead or OR so we can use it for rendering.
-                    Normally there should be no collisions between
-                    stack and tetrimino.
-                */
-                *pfcell ^= tetrimino[r * 4 + c];
-            }
+            *rowptr ^= tetrimino[r];
         }
     }
 }
@@ -524,7 +548,7 @@ PlayCycleResult run_cycle() {
 void init_game() {
     int i;
 
-    for (i = 0; i < (WIDTH * HEIGHT); ++i)
+    for (i = 0; i < HEIGHT; ++i)
         gameboard[i] = 0;
 
     spawn_new_tetrimino();
